@@ -1,0 +1,6 @@
+streamlit[auth]
+Authlib>=1.3.2
+openai>=1.0.0
+openai
+requests
+streamlit

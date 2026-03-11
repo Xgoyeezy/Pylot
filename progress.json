@@ -1,0 +1,18 @@
+{
+    "completed_lessons": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+    ],
+    "current_lesson": 7,
+    "weak_topics": {},
+    "submissions": {
+        "6": ""
+    },
+    "completed_project_milestones": [],
+    "current_project_milestone": 1,
+    "project_submissions": {}
+}
