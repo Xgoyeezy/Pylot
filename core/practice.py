@@ -1,22 +1,93 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, TypedDict
 
 import streamlit as st
 
-from core.ui import (
-    make_button,
-    render_action_buttons,
-    render_bullet_list,
-    render_stats,
-    section_panel,
-)
-from progress import get_learning_profile, update_weak_topics
+from core.engagement import get_daily_quest
+from core.ui import action_row, bullet_list, content_card, make_button, metric_row, mode_header
+from progress import add_xp, can_claim_daily_quest, mark_daily_quest_claimed, update_weak_topics
+
+
+class PracticeExercise(TypedDict):
+    topic: str
+    title: str
+    prompt: str
+    starter_code: str
+    checks: List[str]
+    reward_xp: int
+    hint: str
+
+
+PRACTICE_LIBRARY: Dict[str, PracticeExercise] = {
+    "functions": {
+        "topic": "functions",
+        "title": "Function Practice",
+        "prompt": "Write a function called `double_number` that takes a number and returns double it.",
+        "starter_code": (
+            "def double_number(number):\n"
+            "    # return double the number\n"
+            "    pass\n\n"
+            "print(double_number(4))"
+        ),
+        "checks": ["def ", "return"],
+        "reward_xp": 15,
+        "hint": "A function usually needs both `def` and `return` here.",
+    },
+    "loops": {
+        "topic": "loops",
+        "title": "Loop Practice",
+        "prompt": "Use a loop to print each item in a list of three fruits.",
+        "starter_code": (
+            'fruits = ["apple", "banana", "orange"]\n\n'
+            "# write your loop here"
+        ),
+        "checks": ["for ", "print("],
+        "reward_xp": 15,
+        "hint": "Loop through the list, then print each item inside the loop.",
+    },
+    "conditionals": {
+        "topic": "conditionals",
+        "title": "Conditional Practice",
+        "prompt": "Write code that prints `big` if `number` is greater than 10, otherwise prints `small`.",
+        "starter_code": (
+            "number = 12\n\n"
+            "# write your conditional here"
+        ),
+        "checks": ["if ", "print("],
+        "reward_xp": 15,
+        "hint": "Use `if` for the condition and `else` for the other case.",
+    },
+    "lists": {
+        "topic": "lists",
+        "title": "List Practice",
+        "prompt": "Create a list of three numbers and print the second item.",
+        "starter_code": (
+            "# create your list here\n"
+            "# print the second item"
+        ),
+        "checks": ["[", "]", "print("],
+        "reward_xp": 15,
+        "hint": "Lists use square brackets, and the second item is usually index 1.",
+    },
+    "general": {
+        "topic": "general",
+        "title": "General Python Practice",
+        "prompt": "Create a variable called `name` and print a greeting using it.",
+        "starter_code": (
+            'name = "Marc"\n'
+            'print(f"Hello, {name}")'
+        ),
+        "checks": ["print("],
+        "reward_xp": 10,
+        "hint": "Start simple. Make one variable and print something useful.",
+    },
+}
 
 
 def get_top_weak_topic(weak_topics: Dict[str, int]) -> str:
     if not weak_topics:
-        return "general-python"
+        return "general"
 
     sorted_topics = sorted(
         weak_topics.items(),
@@ -26,263 +97,235 @@ def get_top_weak_topic(weak_topics: Dict[str, int]) -> str:
     return sorted_topics[0][0]
 
 
-def get_practice_exercise(weak_topics: Dict[str, int]) -> Dict[str, Any]:
-    topic = get_top_weak_topic(weak_topics)
+def get_practice_exercise(weak_topics: Dict[str, int]) -> PracticeExercise:
+    top_topic = get_top_weak_topic(weak_topics)
+    return PRACTICE_LIBRARY.get(top_topic, PRACTICE_LIBRARY["general"])
 
-    exercises = {
-        "functions": {
-            "title": "Practice: Writing Functions",
-            "topic": "functions",
-            "prompt": "Write a function called `double_number` that takes one number and returns double its value.",
-            "starter_code": (
-                "def double_number(number):\n"
-                "    # your code here\n"
-                "    pass\n\n"
-                "print(double_number(4))"
-            ),
-            "required_patterns": ["def ", "return"],
-        },
-        "append": {
-            "title": "Practice: Using append()",
-            "topic": "append",
-            "prompt": "Create an empty list called `items`, add three strings to it using `.append()`, then print the list.",
-            "starter_code": (
-                "items = []\n"
-                "# add three items here\n"
-                "print(items)"
-            ),
-            "required_patterns": [".append(", "print("],
-        },
-        "enumerate": {
-            "title": "Practice: Using enumerate()",
-            "topic": "enumerate",
-            "prompt": "Loop through the `tasks` list and print each task with a number starting at 1 using `enumerate()`.",
-            "starter_code": (
-                'tasks = ["Homework", "Laundry", "Study"]\n'
-                "# write your loop here"
-            ),
-            "required_patterns": ["enumerate(", "for ", "print("],
-        },
-        "while-loops": {
-            "title": "Practice: While Loops",
-            "topic": "while-loops",
-            "prompt": "Use a `while` loop to print the numbers 1 through 5.",
-            "starter_code": (
-                "count = 1\n"
-                "# write your while loop here"
-            ),
-            "required_patterns": ["while ", "print("],
-        },
-        "conditionals": {
-            "title": "Practice: Conditionals",
-            "topic": "conditionals",
-            "prompt": "Ask the user for a number. If the number is positive, print `Positive`. Otherwise print `Not positive`.",
-            "starter_code": (
-                'number = int(input("Enter a number: "))\n'
-                "# write your conditional here"
-            ),
-            "required_patterns": ["if ", "print("],
-        },
-        "print": {
-            "title": "Practice: Printing Output",
-            "topic": "print",
-            "prompt": "Create a variable called `message` with the value `Hello, Pylot!` and print it.",
-            "starter_code": (
-                'message = "Hello, Pylot!"\n'
-                "# print the message"
-            ),
-            "required_patterns": ["print("],
-        },
-        "input": {
-            "title": "Practice: User Input",
-            "topic": "input",
-            "prompt": "Ask the user for their favorite color and print a sentence using their answer.",
-            "starter_code": (
-                'color = input("What is your favorite color? ")\n'
-                "# print a sentence using color"
-            ),
-            "required_patterns": ["input(", "print("],
-        },
-        "f-strings": {
-            "title": "Practice: f-Strings",
-            "topic": "f-strings",
-            "prompt": "Create a variable called `name`, set it to your name, and print a greeting using an f-string.",
-            "starter_code": (
-                'name = "Marcus"\n'
-                "# print a greeting using an f-string"
-            ),
-            "required_patterns": ['f"', "print("],
-        },
-        "general-python": {
-            "title": "Practice: General Python",
-            "topic": "general-python",
-            "prompt": "Create a list of three numbers and use a loop to print each one.",
-            "starter_code": (
-                "numbers = [1, 2, 3]\n"
-                "# write your loop here"
-            ),
-            "required_patterns": ["for ", "print("],
-        },
+
+def review_practice_submission(user_code: str, exercise: PracticeExercise) -> Tuple[bool, str, List[str]]:
+    if not user_code.strip():
+        return False, "Write some code before submitting.", [exercise["topic"]]
+
+    missing_tokens: List[str] = []
+    for token in exercise.get("checks", []):
+        if token not in user_code:
+            missing_tokens.append(token)
+
+    if not missing_tokens:
+        return True, "Nice work. Your solution includes the main required pieces.", []
+
+    token_map = {
+        "def ": "a function definition",
+        "return": "a return statement",
+        "for ": "a loop",
+        "if ": "a conditional",
+        "print(": "printed output",
+        "[": "a list",
+        "]": "a list value",
     }
 
-    return exercises.get(topic, exercises["general-python"])
-
-
-def review_practice_submission(user_code: str, exercise: Dict[str, Any]) -> Tuple[str, List[str], bool]:
-    if not user_code.strip():
-        return (
-            "Write some code first, then submit it for review.",
-            [exercise.get("topic", "general-python")],
-            False,
-        )
-
-    feedback: List[str] = []
-    missed_topics: List[str] = []
-
-    for pattern in exercise.get("required_patterns", []):
-        if pattern not in user_code:
-            if pattern == "def ":
-                feedback.append("Your solution should define a function.")
-                missed_topics.append("functions")
-            elif pattern == "return":
-                feedback.append("Your function should return a value.")
-                missed_topics.append("functions")
-            elif pattern == ".append(":
-                feedback.append("Use `.append()` to add items to the list.")
-                missed_topics.append("append")
-            elif pattern == "enumerate(":
-                feedback.append("Use `enumerate()` for this exercise.")
-                missed_topics.append("enumerate")
-            elif pattern == "while ":
-                feedback.append("This exercise should use a `while` loop.")
-                missed_topics.append("while-loops")
-            elif pattern == "if ":
-                feedback.append("This exercise needs an `if` statement.")
-                missed_topics.append("conditionals")
-            elif pattern == "print(":
-                feedback.append("Your solution should print output.")
-                missed_topics.append("print")
-            elif pattern == "input(":
-                feedback.append("This exercise expects you to use `input()`.")
-                missed_topics.append("input")
-            elif pattern == 'f"':
-                feedback.append("Try using an f-string.")
-                missed_topics.append("f-strings")
-            elif pattern == "for ":
-                feedback.append("This exercise should use a `for` loop.")
-                missed_topics.append("loops")
-
-    passed = len(feedback) == 0
-
-    if passed:
-        feedback.append("Nice work. Your practice solution uses the target technique.")
-        feedback.append("Try modifying the code to test different inputs.")
-
-    feedback_text = "\n".join(f"- {item}" for item in feedback)
-    unique_topics = list(dict.fromkeys(missed_topics))
-    return feedback_text, unique_topics, passed
-
-
-def render_learning_profile() -> None:
-    profile = get_learning_profile()
-
-    section_panel(
-        title="Personalized Practice",
-        description="Practice adapts based on your weak topics and recent review results.",
-        icon="🧠",
+    readable_missing = [token_map.get(token, token) for token in missing_tokens]
+    return (
+        False,
+        "Your solution is missing some expected parts: " + ", ".join(readable_missing),
+        [exercise["topic"]],
     )
 
-    render_stats(
-        [
-            ("Completed Lessons", profile["completed_lessons"]),
-            ("Completed Projects", profile["completed_projects"]),
-            ("Recommended Mode", profile["recommended_mode"]),
-        ]
-    )
 
-    if profile["top_weak_topics"]:
-        st.markdown("### Current Focus Areas")
-        focus_lines = [
-            f"{topic} — weakness score {score}"
-            for topic, score in profile["top_weak_topics"]
-        ]
-        render_bullet_list(focus_lines)
-    else:
-        st.success("No major weak topics detected yet. Great start.")
+def clear_practice_feedback() -> None:
+    st.session_state["practice_feedback"] = ""
+    st.session_state["practice_passed"] = None
 
 
-def load_practice_starter(starter_code: str) -> None:
-    st.session_state["practice_code"] = starter_code
+def _set_editor_for_exercise(exercise: PracticeExercise) -> None:
+    st.session_state["practice_current_topic"] = exercise["topic"]
+    st.session_state["practice_editor_value"] = exercise["starter_code"]
+
+
+def load_starter_code(starter_code: str) -> None:
+    st.session_state["practice_editor_value"] = starter_code
+    clear_practice_feedback()
     st.rerun()
 
 
-def submit_practice_review(user_code: str, exercise: Dict[str, Any]) -> None:
-    feedback_text, missed_topics, passed = review_practice_submission(user_code, exercise)
+def submit_practice(progress_data: Dict[str, Any], exercise: PracticeExercise, user_code: str) -> None:
+    passed, feedback, missed_topics = review_practice_submission(user_code, exercise)
 
     if passed:
         update_weak_topics([exercise["topic"]], success=True)
+        add_xp(exercise["reward_xp"])
     else:
-        update_weak_topics(missed_topics or [exercise["topic"]], success=False)
+        update_weak_topics(missed_topics, success=False)
 
-    st.session_state["practice_feedback"] = feedback_text
-    st.session_state["practice_missed_topics"] = missed_topics
+    st.session_state["practice_feedback"] = feedback
     st.session_state["practice_passed"] = passed
+    st.session_state["progress_data"] = progress_data
+    st.rerun()
+
+
+def claim_practice_daily_quest() -> None:
+    quest = get_daily_quest()
+
+    if quest["mode"] != "Practice Mode":
+        st.warning("Today's quest is tied to a different mode.")
+        return
+
+    if not can_claim_daily_quest():
+        st.warning("Daily quest already claimed today.")
+        return
+
+    add_xp(int(quest["reward_xp"]))
+    mark_daily_quest_claimed()
+    st.success(f"Daily quest reward claimed: +{quest['reward_xp']} XP")
     st.rerun()
 
 
 def render_feedback() -> None:
-    if "practice_feedback" in st.session_state:
-        st.markdown("### Feedback")
-        if st.session_state.get("practice_passed"):
-            st.success(st.session_state["practice_feedback"])
-        else:
-            st.warning(st.session_state["practice_feedback"])
+    feedback = st.session_state.get("practice_feedback", "")
+    passed = st.session_state.get("practice_passed")
 
-    missed = st.session_state.get("practice_missed_topics", [])
-    if missed:
-        st.caption("Topics to reinforce: " + ", ".join(missed))
+    if not feedback:
+        return
+
+    st.markdown("### Feedback")
+    if passed is True:
+        st.success(feedback)
+    elif passed is False:
+        st.warning(feedback)
+
+
+def render_daily_quest_panel() -> None:
+    quest = get_daily_quest()
+    if quest["mode"] != "Practice Mode":
+        return
+
+    st.markdown("### Today's Practice Quest")
+    content_card(
+        title=quest["title"],
+        body=quest["description"],
+        meta=f"Hint: {quest['hint']}",
+        badge=f"+{quest['reward_xp']} XP",
+        min_height=130,
+    )
+
+    action_row(
+        [
+            make_button(
+                label="Claim Daily Quest Reward",
+                key="practice_claim_daily_quest",
+                action=claim_practice_daily_quest,
+                disabled=not can_claim_daily_quest(),
+            )
+        ]
+    )
+
+
+def render_focus_guidance(focus_topic: str) -> None:
+    st.markdown("### Focus Guidance")
+
+    guidance_map = {
+        "functions": [
+            "Use `def` to create the function",
+            "Return a value instead of only printing",
+            "Call the function to test it",
+        ],
+        "loops": [
+            "Use a `for` loop for repeating over items",
+            "Print inside the loop body",
+            "Keep indentation consistent",
+        ],
+        "conditionals": [
+            "Use `if` to test the condition",
+            "Add `else` when two outcomes are needed",
+            "Print the result clearly",
+        ],
+        "lists": [
+            "Create the list with square brackets",
+            "Use an index like `[1]` for the second item",
+            "Print the selected value",
+        ],
+        "general": [
+            "Write a small working solution first",
+            "Prefer clear variable names",
+            "Print the result so you can verify it",
+        ],
+    }
+
+    bullet_list(guidance_map.get(focus_topic, guidance_map["general"]))
 
 
 def render(progress_data: Dict[str, Any]) -> None:
-    _ = progress_data
-
-    render_learning_profile()
-
-    weak_topics = get_learning_profile()["weak_topics"]
+    weak_topics = progress_data.get("weak_topics", {})
     exercise = get_practice_exercise(weak_topics)
+    focus_topic = exercise["topic"]
 
-    section_panel(
+    mode_header(
+        "Practice Mode",
+        "Strengthen weak topics with targeted exercises and quick feedback.",
+        "🎯",
+    )
+
+    metric_row(
+        [
+            ("Focus Topic", focus_topic),
+            ("Weak Topics", len(weak_topics)),
+            ("Reward", f"{exercise['reward_xp']} XP"),
+            ("Checks", len(exercise["checks"])),
+        ]
+    )
+
+    render_daily_quest_panel()
+
+    content_card(
         title=exercise["title"],
-        description=exercise["prompt"],
-        icon="📝",
+        body=exercise["prompt"],
+        meta=f"Hint: {exercise['hint']}",
+        badge="Practice",
+        min_height=150,
     )
 
-    default_code = st.session_state.get(
-        "practice_code",
-        exercise["starter_code"],
-    )
+    left_col, right_col = st.columns([2, 1])
+    with left_col:
+        bullet_list(
+            [
+                "Read the target prompt",
+                "Write the shortest working solution you can",
+                "Submit to get instant feedback",
+                "Use practice to lower your weak-topic score",
+            ]
+        )
+    with right_col:
+        render_focus_guidance(focus_topic)
+
+    current_topic = st.session_state.get("practice_current_topic")
+    if current_topic != exercise["topic"] or "practice_editor_value" not in st.session_state:
+        _set_editor_for_exercise(exercise)
+
+    current_value = st.session_state.get("practice_editor_value", exercise["starter_code"])
 
     user_code = st.text_area(
-        "Write your code here",
-        value=default_code,
-        height=260,
+        "Practice Code",
+        value=current_value,
+        height=240,
         key="practice_code_editor",
     )
-    st.session_state["practice_code"] = user_code
 
-    render_action_buttons(
+    st.session_state["practice_editor_value"] = user_code
+
+    action_row(
         [
             make_button(
                 label="Load Starter Code",
                 key="practice_load_starter",
-                action=lambda: load_practice_starter(exercise["starter_code"]),
+                action=lambda: load_starter_code(exercise["starter_code"]),
             ),
             make_button(
-                label="Review Submission",
-                key="practice_review_submission",
-                action=lambda: submit_practice_review(user_code, exercise),
+                label="Submit Practice",
+                key="practice_submit",
+                action=lambda: submit_practice(progress_data, exercise, user_code),
             ),
         ]
     )
 
     render_feedback()
+    st.caption(f"Current practice focus: {focus_topic}")

@@ -1,1 +1,0 @@
-# Makes the core folder a Python package.

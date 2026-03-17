@@ -1,321 +1,478 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional, TypedDict
 
 import streamlit as st
 
-from core.ui import (
-    content_card,
-    make_button,
-    render_action_buttons,
-    render_bullet_list,
-    render_stats,
-    section_panel,
-)
+from core.engagement import get_daily_quest
+from core.ui import action_row, bullet_list, content_card, make_button, metric_row, mode_header
 from progress import (
+    add_xp,
+    can_claim_daily_quest,
     has_passed_project_review,
+    is_lesson_complete,
     is_project_complete,
+    mark_daily_quest_claimed,
     mark_project_complete,
 )
 
 
-PROJECT_MILESTONES: List[Dict[str, Any]] = [
-    {
-        "id": "project-1",
-        "title": "Greeting App",
-        "level": "Beginner",
-        "duration": "20 min",
-        "summary": "Build a simple Python program that greets a user by name.",
-        "goal": "Practice variables, input, print, and simple function structure.",
-        "requirements": [
-            "Ask the user for their name",
-            "Store the name in a variable",
-            "Print a greeting using that name",
-        ],
-        "starter_code": (
-            'name = input("What is your name? ")\n'
-            '# print a greeting here\n'
-        ),
-        "example_output": "Hello, Marcus!",
-    },
-    {
-        "id": "project-2",
-        "title": "Number Checker",
-        "level": "Beginner",
-        "duration": "25 min",
-        "summary": "Build a small program that checks whether a number is positive, negative, or zero.",
-        "goal": "Practice conditionals and clean branching logic.",
-        "requirements": [
-            "Ask the user for a number",
-            "Convert the value to an integer",
-            "Use if/elif/else",
-            "Print the correct classification",
-        ],
-        "starter_code": (
-            'number = int(input("Enter a number: "))\n'
-            '# write your conditional logic here\n'
-        ),
-        "example_output": "Positive",
-    },
-    {
-        "id": "project-3",
-        "title": "Task List Printer",
-        "level": "Beginner",
-        "duration": "25 min",
-        "summary": "Create a list of tasks and print each one with a loop.",
-        "goal": "Practice lists, loops, and clean output formatting.",
-        "requirements": [
-            "Create a list of at least three tasks",
-            "Use a loop",
-            "Print each task clearly",
-        ],
-        "starter_code": (
-            'tasks = ["Homework", "Laundry", "Study"]\n'
-            '# loop through the tasks and print each one\n'
-        ),
-        "example_output": "Homework\nLaundry\nStudy",
-    },
-    {
-        "id": "project-4",
-        "title": "Mini Function Project",
-        "level": "Beginner",
-        "duration": "30 min",
-        "summary": "Write a function that calculates and returns a result, then print it.",
-        "goal": "Practice function definition, return values, and calling functions.",
-        "requirements": [
-            "Define a function",
-            "Accept at least one parameter",
-            "Return a value",
-            "Call the function and print the result",
-        ],
-        "starter_code": (
-            "def double_number(number):\n"
-            "    # return double the input\n"
+class ProjectData(TypedDict):
+    id: str
+    title: str
+    description: str
+    difficulty: str
+    starter_code: str
+    requirements: List[str]
+    reward_xp: int
+    required_lessons: List[str]
+    milestones: List[str]
+    portfolio_value: List[str]
+
+
+def build_project(
+    project_id: str,
+    title: str,
+    description: str,
+    difficulty: str,
+    starter_code: str,
+    requirements: List[str],
+    reward_xp: int,
+    required_lessons: List[str],
+    milestones: List[str],
+    portfolio_value: List[str],
+) -> ProjectData:
+    return {
+        "id": project_id,
+        "title": title,
+        "description": description,
+        "difficulty": difficulty,
+        "starter_code": starter_code,
+        "requirements": requirements,
+        "reward_xp": reward_xp,
+        "required_lessons": required_lessons,
+        "milestones": milestones,
+        "portfolio_value": portfolio_value,
+    }
+
+
+PROJECTS: List[ProjectData] = [
+    build_project(
+        project_id="calculator-app",
+        title="Calculator App",
+        description="Build a simple calculator that adds, subtracts, multiplies, and divides two numbers.",
+        difficulty="Beginner",
+        starter_code=(
+            "def add(a, b):\n"
+            "    return a + b\n\n"
+            "def subtract(a, b):\n"
+            "    # return the difference\n"
             "    pass\n\n"
-            "print(double_number(4))\n"
+            "def multiply(a, b):\n"
+            "    # return the product\n"
+            "    pass\n\n"
+            "def divide(a, b):\n"
+            "    # return the quotient\n"
+            "    pass\n\n"
+            "print(add(2, 3))\n"
         ),
-        "example_output": "8",
-    },
+        requirements=[
+            "Use at least one function",
+            "Print at least one result",
+            "Implement calculator logic",
+            "Handle all four operations",
+        ],
+        reward_xp=60,
+        required_lessons=["variables", "conditionals", "functions"],
+        milestones=[
+            "Create the math functions",
+            "Make each function return a value",
+            "Test the operations with print statements",
+            "Clean up unfinished code before review",
+        ],
+        portfolio_value=[
+            "Shows practical Python logic and reusable functions",
+            "Demonstrates basic software structure",
+            "Can be upgraded into a menu-based calculator app",
+        ],
+    ),
+    build_project(
+        project_id="task-tracker",
+        title="Task Tracker",
+        description="Build a basic task tracker using a list and loops.",
+        difficulty="Beginner",
+        starter_code=(
+            "tasks = []\n\n"
+            'tasks.append("Study Python")\n'
+            'tasks.append("Build a project")\n\n'
+            "for task in tasks:\n"
+            "    print(task)\n"
+        ),
+        requirements=[
+            "Use a list",
+            "Add at least one task",
+            "Print the stored tasks",
+            "Use a loop",
+        ],
+        reward_xp=60,
+        required_lessons=["variables", "loops"],
+        milestones=[
+            "Create the task list",
+            "Add multiple tasks",
+            "Loop through the tasks",
+            "Print clear output for the user",
+        ],
+        portfolio_value=[
+            "Shows how to store and display structured data",
+            "Demonstrates loops and list usage",
+            "Can be upgraded into a real terminal productivity app",
+        ],
+    ),
 ]
 
 
-def get_project_by_id(project_id: str) -> Optional[Dict[str, Any]]:
-    for project in PROJECT_MILESTONES:
+def get_project(project_id: str) -> Optional[ProjectData]:
+    for project in PROJECTS:
         if project["id"] == project_id:
             return project
     return None
 
 
+def is_project_unlocked(project: ProjectData) -> bool:
+    required_lessons = project.get("required_lessons", [])
+    if not required_lessons:
+        return True
+    return all(is_lesson_complete(lesson_id) for lesson_id in required_lessons)
+
+
+def get_project_unlock_reason(project: ProjectData) -> str:
+    missing_lessons = [
+        lesson_id
+        for lesson_id in project.get("required_lessons", [])
+        if not is_lesson_complete(lesson_id)
+    ]
+
+    if not missing_lessons:
+        return ""
+
+    formatted = ", ".join(missing_lessons)
+    return f"Complete these lessons first: {formatted}"
+
+
 def get_project_summary() -> Dict[str, int]:
     completed = 0
-    review_passed = 0
+    reviewed = 0
+    unlocked = 0
 
-    for project in PROJECT_MILESTONES:
-        if is_project_complete(project["id"]):
+    for project in PROJECTS:
+        project_id = project["id"]
+        if is_project_complete(project_id):
             completed += 1
-        if has_passed_project_review(project["id"]):
-            review_passed += 1
+        if has_passed_project_review(project_id):
+            reviewed += 1
+        if is_project_unlocked(project):
+            unlocked += 1
 
     return {
-        "total": len(PROJECT_MILESTONES),
+        "total": len(PROJECTS),
         "completed": completed,
-        "passed_review": review_passed,
+        "reviewed": reviewed,
+        "unlocked": unlocked,
     }
 
 
-def project_status_label(project_id: str) -> str:
-    if is_project_complete(project_id):
-        return "✅ Complete"
-    if has_passed_project_review(project_id):
-        return "🟢 Review Passed"
-    return "🟡 In Progress"
-
-
 def open_project(project_id: str) -> None:
+    project = get_project(project_id)
+    if project is None:
+        st.error("Project not found.")
+        return
+
+    if not is_project_unlocked(project):
+        st.warning(get_project_unlock_reason(project))
+        return
+
     st.session_state["selected_project_id"] = project_id
     st.rerun()
 
 
-def back_to_all_projects() -> None:
+def close_project() -> None:
     st.session_state["selected_project_id"] = None
     st.rerun()
 
 
-def send_project_to_review(project_id: str, code: str) -> None:
-    st.session_state["selected_mode"] = "Review Mode"
-    st.session_state["review_target_type"] = "project"
-    st.session_state["review_target_id"] = project_id
-    st.session_state["review_target_code"] = code
+def load_project_starter(project_id: str, starter_code: str) -> None:
+    st.session_state[f"project_editor_{project_id}"] = starter_code
     st.rerun()
 
 
-def reset_project_code(project_id: str, starter_code: str) -> None:
-    st.session_state[f"project_code_{project_id}"] = starter_code
+def send_project_to_review(project_id: str, code: str) -> None:
+    st.session_state["review_target_type"] = "project"
+    st.session_state["review_target_id"] = project_id
+    st.session_state["review_target_code"] = code
+    st.session_state["selected_mode"] = "Review Mode"
     st.rerun()
 
 
 def complete_project(project_id: str) -> None:
-    if mark_project_complete(project_id):
-        st.success("Project marked complete.")
-        st.rerun()
-    else:
-        st.error("Project cannot be completed until review is passed.")
+    mark_project_complete(project_id)
+    st.success("Project completed.")
+    st.session_state["selected_project_id"] = None
+    st.rerun()
 
 
-def render_project_card(project: Dict[str, Any]) -> None:
-    project_id = project["id"]
-    status = project_status_label(project_id)
+def claim_project_daily_quest() -> None:
+    quest = get_daily_quest()
 
-    meta_text = (
-        f"<strong>Level:</strong> {project['level']} &nbsp;&nbsp; "
-        f"<strong>Duration:</strong> {project['duration']}<br>"
-        f"<strong>Goal:</strong> {project['goal']}"
+    if quest["mode"] != "Project Mode":
+        st.warning("Today's quest is tied to a different mode.")
+        return
+
+    if not can_claim_daily_quest():
+        st.warning("Daily quest already claimed today.")
+        return
+
+    add_xp(int(quest["reward_xp"]))
+    mark_daily_quest_claimed()
+    st.success(f"Daily quest reward claimed: +{quest['reward_xp']} XP")
+    st.rerun()
+
+
+def project_status(project_id: str) -> tuple[bool, bool]:
+    completed = is_project_complete(project_id)
+    review_passed = has_passed_project_review(project_id)
+    return completed, review_passed
+
+
+def render_project_daily_quest_panel() -> None:
+    quest = get_daily_quest()
+    if quest["mode"] != "Project Mode":
+        return
+
+    st.markdown("### Today's Project Quest")
+    content_card(
+        title=quest["title"],
+        body=quest["description"],
+        meta=f"Hint: {quest['hint']}",
+        badge=f"+{quest['reward_xp']} XP",
+        min_height=130,
     )
+
+    action_row(
+        [
+            make_button(
+                label="Claim Daily Quest Reward",
+                key="project_claim_daily_quest",
+                action=claim_project_daily_quest,
+                disabled=not can_claim_daily_quest(),
+            )
+        ]
+    )
+
+
+def render_project_card(project: ProjectData) -> None:
+    project_id = project["id"]
+    completed, review_passed = project_status(project_id)
+    unlocked = is_project_unlocked(project)
+
+    if completed:
+        badge = "✅ Complete"
+    elif review_passed:
+        badge = "🟢 Review Passed"
+    elif unlocked:
+        badge = "🟡 Unlocked"
+    else:
+        badge = "🔒 Locked"
+
+    meta_parts = [
+        f"Difficulty: {project['difficulty']}",
+        f"Reward: {project['reward_xp']} XP",
+    ]
+
+    if project["required_lessons"]:
+        meta_parts.append("Required lessons: " + ", ".join(project["required_lessons"]))
+
+    if not unlocked:
+        meta_parts.append(get_project_unlock_reason(project))
 
     content_card(
         title=project["title"],
-        body=project["summary"],
-        badge=status,
-        subbadge="",
-        meta_text=meta_text,
-        min_height=220,
+        body=project["description"],
+        meta="<br>".join(meta_parts),
+        badge=badge,
+        min_height=230,
     )
 
-    render_action_buttons(
+    action_row(
         [
             make_button(
                 label=f"Open {project['title']}",
                 key=f"open_project_{project_id}",
-                action=lambda: open_project(project_id),
+                action=lambda selected_id=project_id: open_project(selected_id),
+                disabled=not unlocked,
             )
         ]
     )
 
 
-def render_project_detail(project: Dict[str, Any]) -> None:
-    project_id = project["id"]
-    completed = is_project_complete(project_id)
-    review_passed = has_passed_project_review(project_id)
-
-    section_panel(
-        title=project["title"],
-        description=project["summary"],
-        icon="🛠️",
-    )
-
-    render_stats(
-        [
-            ("Level", project["level"]),
-            ("Duration", project["duration"]),
-            ("Status", "Complete" if completed else "Active"),
-        ]
-    )
-
-    st.markdown("### Project Goal")
-    st.write(project["goal"])
-
-    st.markdown("### Requirements")
-    render_bullet_list(project["requirements"])
-
-    st.markdown("### Example Output")
-    st.code(project["example_output"], language="text")
-
-    current_code = st.session_state.get(
-        f"project_code_{project_id}",
-        project["starter_code"],
-    )
-
-    updated_code = st.text_area(
-        "Build your project here",
-        value=current_code,
-        height=320,
-        key=f"project_editor_{project_id}",
-    )
-    st.session_state[f"project_code_{project_id}"] = updated_code
-
-    render_action_buttons(
-        [
-            make_button(
-                label="Load Starter Code",
-                key=f"load_project_starter_{project_id}",
-                action=lambda: reset_project_code(project_id, project["starter_code"]),
-            ),
-            make_button(
-                label="Send to Review Mode",
-                key=f"send_project_review_{project_id}",
-                action=lambda: send_project_to_review(project_id, updated_code),
-            ),
-        ]
-    )
-
-    st.markdown("### Completion")
-
-    if review_passed:
-        st.success("Project review passed. You can now mark this project complete.")
-    else:
-        st.warning("You must pass review before completing this project.")
-
-    render_action_buttons(
-        [
-            make_button(
-                label="Mark Project Complete",
-                key=f"mark_project_complete_{project_id}",
-                action=lambda: complete_project(project_id),
-                disabled=(not review_passed) or completed,
-            )
-        ]
-    )
-
-    if completed:
-        st.caption("This project is already complete.")
-
-    render_action_buttons(
-        [
-            make_button(
-                label="Back to All Projects",
-                key=f"back_to_projects_{project_id}",
-                action=back_to_all_projects,
-            )
-        ]
-    )
-
-
-def render_catalog() -> None:
-    st.subheader("All Projects")
-
-    col1, col2 = st.columns(2)
-    project_columns = [col1, col2]
-
-    for index, project in enumerate(PROJECT_MILESTONES):
-        with project_columns[index % 2]:
-            render_project_card(project)
-            st.markdown("")
-
-
-def render(progress_data: Dict[str, Any]) -> None:
-    _ = progress_data
-
+def render_project_catalog(_: Dict[str, object]) -> None:
     summary = get_project_summary()
 
-    section_panel(
-        title="Project Mode",
-        description="Build milestone-based Python projects, send them to review, and unlock completion by passing.",
-        icon="🛠️",
+    mode_header(
+        "Project Mode",
+        "Build milestone projects and unlock them by completing lesson prerequisites.",
+        "🛠️",
     )
 
-    render_stats(
+    metric_row(
         [
             ("Projects", summary["total"]),
-            ("Review Passed", summary["passed_review"]),
+            ("Unlocked", summary["unlocked"]),
+            ("Reviewed", summary["reviewed"]),
             ("Completed", summary["completed"]),
         ]
     )
 
-    selected_project_id = st.session_state.get("selected_project_id")
-    selected_project = get_project_by_id(selected_project_id) if selected_project_id else None
+    render_project_daily_quest_panel()
 
-    if selected_project:
-        render_project_detail(selected_project)
+    col1, col2 = st.columns(2)
+    columns = [col1, col2]
+
+    for index, project in enumerate(PROJECTS):
+        with columns[index % 2]:
+            render_project_card(project)
+
+
+def render_project_requirements(project: ProjectData) -> None:
+    st.markdown("### Requirements")
+    bullet_list(project["requirements"])
+
+
+def render_project_milestones(project: ProjectData) -> None:
+    st.markdown("### Build Milestones")
+    bullet_list(project["milestones"])
+
+
+def render_project_portfolio_value(project: ProjectData) -> None:
+    st.markdown("### Why This Project Has Value")
+    bullet_list(project["portfolio_value"])
+
+
+def render_project_editor(project: ProjectData) -> str:
+    editor_key = f"project_editor_{project['id']}"
+
+    if editor_key not in st.session_state:
+        st.session_state[editor_key] = project["starter_code"]
+
+    user_code = st.text_area(
+        "Project Code",
+        value=st.session_state[editor_key],
+        height=320,
+        key=f"{editor_key}_widget",
+    )
+
+    st.session_state[editor_key] = user_code
+    return user_code
+
+
+def render_project_editor_actions(project: ProjectData, user_code: str) -> None:
+    project_id = project["id"]
+
+    action_row(
+        [
+            make_button(
+                label="Load Starter Code",
+                key=f"starter_{project_id}",
+                action=lambda selected_id=project_id, starter=project["starter_code"]: load_project_starter(selected_id, starter),
+            ),
+            make_button(
+                label="Send to Review",
+                key=f"review_{project_id}",
+                action=lambda selected_id=project_id, code=user_code: send_project_to_review(selected_id, code),
+            ),
+        ]
+    )
+
+
+def render_completion_section(project: ProjectData) -> None:
+    project_id = project["id"]
+    completed, review_passed = project_status(project_id)
+
+    st.markdown("### Completion")
+
+    if review_passed:
+        st.success(f"Review passed. Completing this project awards {project['reward_xp']} XP.")
+    else:
+        st.info("Pass review before completing this project.")
+
+    action_row(
+        [
+            make_button(
+                label="Mark Complete",
+                key=f"complete_{project_id}",
+                action=lambda selected_id=project_id: complete_project(selected_id),
+                disabled=(not review_passed) or completed,
+            ),
+            make_button(
+                label="Back to Projects",
+                key=f"back_{project_id}",
+                action=close_project,
+            ),
+        ]
+    )
+
+
+def render_project_detail(progress_data: Dict[str, object], project_id: str) -> None:
+    _ = progress_data
+
+    project = get_project(project_id)
+    if project is None:
+        st.error("Project not found.")
         return
 
-    render_catalog()
+    if not is_project_unlocked(project):
+        st.warning(get_project_unlock_reason(project))
+        close_project()
+        return
+
+    mode_header(
+        project["title"],
+        project["description"],
+        "🚀",
+    )
+
+    completed, review_passed = project_status(project_id)
+
+    metric_row(
+        [
+            ("Difficulty", project["difficulty"]),
+            ("Reward", f"{project['reward_xp']} XP"),
+            ("Reviewed", "Yes" if review_passed else "No"),
+            ("Completed", "Yes" if completed else "No"),
+        ]
+    )
+
+    if project["required_lessons"]:
+        st.caption("Required lessons: " + ", ".join(project["required_lessons"]))
+
+    left_col, right_col = st.columns([2, 1])
+
+    with left_col:
+        render_project_requirements(project)
+        user_code = render_project_editor(project)
+        render_project_editor_actions(project, user_code)
+        render_completion_section(project)
+
+    with right_col:
+        render_project_milestones(project)
+        render_project_portfolio_value(project)
+        render_project_daily_quest_panel()
+
+
+def render(progress_data: Dict[str, object]) -> None:
+    selected_project_id = st.session_state.get("selected_project_id")
+
+    if selected_project_id:
+        render_project_detail(progress_data, selected_project_id)
+        return
+
+    render_project_catalog(progress_data)

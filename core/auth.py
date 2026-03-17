@@ -5,11 +5,11 @@ import streamlit as st
 
 def auth_is_configured() -> bool:
     try:
-        auth_section = st.secrets.get("auth", {})
+        auth_config = st.secrets.get("auth", {})
         return bool(
-            auth_section.get("client_id")
-            and auth_section.get("client_secret")
-            and auth_section.get("redirect_uri")
+            auth_config.get("client_id")
+            and auth_config.get("client_secret")
+            and auth_config.get("redirect_uri")
         )
     except (AttributeError, KeyError):
         return False
@@ -42,7 +42,6 @@ def auth_sidebar() -> None:
             st.info("Guest mode (progress saved locally).")
             if st.button("Sign in with Google", use_container_width=True):
                 st.login()
-
     except (AttributeError, RuntimeError):
         st.info("Authentication UI temporarily unavailable.")
 

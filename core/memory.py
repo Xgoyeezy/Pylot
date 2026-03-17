@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import streamlit as st
 
-from core.ui import make_button, render_action_buttons, section_panel
+from core.ui import action_row, bullet_list, make_button, metric_row, mode_header
 
 DB_PATH = "memory.db"
 
@@ -23,29 +23,29 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
-def execute_write(query: str, params: tuple = ()) -> int:
+def execute_write(query: str, params: tuple[Any, ...] | None = None) -> int:
     connection = get_connection()
     cursor = connection.cursor()
-    cursor.execute(query, params)
+    cursor.execute(query, params or ())
     affected = cursor.rowcount
     connection.commit()
     connection.close()
     return affected
 
 
-def fetch_all(query: str, params: tuple = ()) -> List[sqlite3.Row]:
+def fetch_all(query: str, params: tuple[Any, ...] | None = None) -> List[sqlite3.Row]:
     connection = get_connection()
     cursor = connection.cursor()
-    cursor.execute(query, params)
+    cursor.execute(query, params or ())
     rows = cursor.fetchall()
     connection.close()
     return rows
 
 
-def fetch_one(query: str, params: tuple = ()) -> Optional[sqlite3.Row]:
+def fetch_one(query: str, params: tuple[Any, ...] | None = None) -> Optional[sqlite3.Row]:
     connection = get_connection()
     cursor = connection.cursor()
-    cursor.execute(query, params)
+    cursor.execute(query, params or ())
     row = cursor.fetchone()
     connection.close()
     return row
@@ -122,6 +122,7 @@ def get_memory_entry(category: str, key: str) -> Optional[Dict[str, Any]]:
         SELECT id, category, key, value, notes, created_at, updated_at
         FROM memory_entries
         WHERE category = ? AND key = ?
+        LIMIT 1
         """,
         (category, key),
     )
@@ -129,7 +130,7 @@ def get_memory_entry(category: str, key: str) -> Optional[Dict[str, Any]]:
 
 
 def set_memory_entry(category: str, key: str, value: Any, notes: str = "") -> None:
-    now = utc_now()
+    timestamp = utc_now()
     value_text = json.dumps(value, ensure_ascii=False, indent=2)
 
     execute_write(
@@ -141,7 +142,7 @@ def set_memory_entry(category: str, key: str, value: Any, notes: str = "") -> No
             notes = excluded.notes,
             updated_at = excluded.updated_at
         """,
-        (category, key, value_text, notes, now, now),
+        (category, key, value_text, notes, timestamp, timestamp),
     )
 
     log_event(
@@ -249,6 +250,11 @@ def export_memory_to_file(output_path: str) -> str:
     return str(path)
 
 
+def export_memory_action() -> None:
+    path = export_memory_to_file("memory_export.json")
+    st.success(f"Exported memory to {path}.")
+
+
 def copy_entry_to_editor(entry: Dict[str, Any]) -> None:
     st.session_state["memory_edit_category"] = entry["category"]
     st.session_state["memory_edit_key"] = entry["key"]
@@ -257,34 +263,7 @@ def copy_entry_to_editor(entry: Dict[str, Any]) -> None:
     st.success("Entry copied to editor.")
 
 
-def render_entry_block(entry: Dict[str, Any], allow_copy: bool = True, key_prefix: str = "memory") -> None:
-    with st.expander(f'{entry["category"]} / {entry["key"]}', expanded=False):
-        st.caption(f'Updated: {entry["updated_at"]}')
-        if entry.get("notes"):
-            st.write(f'Notes: {entry["notes"]}')
-        st.code(entry["value"], language="json")
-
-        buttons = [
-            make_button(
-                label="Delete entry",
-                key=f'{key_prefix}_delete_{entry["id"]}',
-                action=lambda: _delete_and_rerun(entry["category"], entry["key"]),
-            )
-        ]
-
-        if allow_copy:
-            buttons.append(
-                make_button(
-                    label="Copy to editor",
-                    key=f'{key_prefix}_copy_{entry["id"]}',
-                    action=lambda: copy_entry_to_editor(entry),
-                )
-            )
-
-        render_action_buttons(buttons)
-
-
-def _delete_and_rerun(category: str, key: str) -> None:
+def delete_entry_and_rerun(category: str, key: str) -> None:
     if delete_memory_entry(category, key):
         st.success("Entry deleted.")
         st.rerun()
@@ -292,13 +271,13 @@ def _delete_and_rerun(category: str, key: str) -> None:
         st.error("Could not delete entry.")
 
 
-def _clear_category_and_rerun(category: str) -> None:
+def clear_category_and_rerun(category: str) -> None:
     deleted_count = clear_category(category)
     st.success(f"Deleted {deleted_count} entries from '{category}'.")
     st.rerun()
 
 
-def _save_entry_and_rerun(category: str, key: str, value_text: str, notes: str) -> None:
+def save_entry_and_rerun(category: str, key: str, value_text: str, notes: str) -> None:
     parsed_value = try_parse_json(value_text)
     set_memory_entry(
         category=category.strip(),
@@ -308,6 +287,74 @@ def _save_entry_and_rerun(category: str, key: str, value_text: str, notes: str) 
     )
     st.success("Entry saved.")
     st.rerun()
+
+
+def seed_learning_memory() -> None:
+    defaults = [
+        (
+            "system",
+            "platform_positioning",
+            {
+                "name": "Pylix",
+                "tagline": "Learn Python by Building",
+                "core_value": "interactive Python learning with projects, AI tutoring, progress tracking, and competitive practice",
+            },
+            "Core brand identity for AI context.",
+        ),
+        (
+            "system",
+            "shock_features",
+            {
+                "primary": "Live Code Battles",
+                "secondary": "AI Code Coach",
+                "career": "Portfolio Builder",
+            },
+            "High-value product differentiators.",
+        ),
+        (
+            "system",
+            "career_paths",
+            {
+                "paths": ["Python Developer", "Automation Engineer", "Competitive Python"],
+            },
+            "Structured learning outcomes.",
+        ),
+    ]
+
+    for category, key, value, notes in defaults:
+        if get_memory_entry(category, key) is None:
+            set_memory_entry(category, key, value, notes)
+
+
+def render_entry_block(entry: Dict[str, Any], allow_copy: bool = True, key_prefix: str = "memory") -> None:
+    entry_id = entry["id"]
+    entry_category = entry["category"]
+    entry_key = entry["key"]
+
+    with st.expander(f'{entry_category} / {entry_key}', expanded=False):
+        st.caption(f'Updated: {entry["updated_at"]}')
+        if entry.get("notes"):
+            st.write(f'Notes: {entry["notes"]}')
+        st.code(entry["value"], language="json")
+
+        buttons = [
+            make_button(
+                label="Delete Entry",
+                key=f"{key_prefix}_delete_{entry_id}",
+                action=lambda c=entry_category, k=entry_key: delete_entry_and_rerun(c, k),
+            )
+        ]
+
+        if allow_copy:
+            buttons.append(
+                make_button(
+                    label="Copy to Editor",
+                    key=f"{key_prefix}_copy_{entry_id}",
+                    action=lambda c=entry_category, k=entry_key: copy_entry_to_editor(get_memory_entry(c, k) or entry),
+                )
+            )
+
+        action_row(buttons)
 
 
 def render_browse_tab() -> None:
@@ -327,7 +374,14 @@ def render_browse_tab() -> None:
         else [entry for entry in all_entries if entry["category"] == selected_category]
     )
 
-    st.caption(f"Entries found: {len(filtered_entries)}")
+    metric_row(
+        [
+            ("Entries", len(all_entries)),
+            ("Filtered", len(filtered_entries)),
+            ("Categories", len(categories)),
+            ("Events", len(get_recent_events(100))),
+        ]
+    )
 
     if not filtered_entries:
         st.info("No memory entries found.")
@@ -341,28 +395,27 @@ def render_browse_tab() -> None:
         key="memory_clear_category_text",
     )
 
-    render_action_buttons(
+    def clear_category_action() -> None:
+        if not clear_target.strip():
+            st.warning("Enter a category name first.")
+            return
+        clear_category_and_rerun(clear_target.strip())
+
+    action_row(
         [
             make_button(
-                label="Clear category",
+                label="Clear Category",
                 key="memory_clear_category_btn",
-                action=lambda: (
-                    st.warning("Enter a category name first.")
-                    if not clear_target.strip()
-                    else _clear_category_and_rerun(clear_target.strip())
-                ),
+                action=clear_category_action,
+            ),
+            make_button(
+                label="Export Memory to JSON",
+                key="memory_export_btn",
+                action=export_memory_action,
             ),
         ]
     )
-def export_memory_action() -> None:
-    path = export_memory_to_file("memory_export.json")
-    st.success(f"Exported memory to {path}.")
 
-    make_button(
-        label="Export memory to JSON",
-        key="memory_export_btn",
-        action=export_memory_action,
-    )
 
 def render_add_update_tab() -> None:
     st.markdown("### Add or Update Entry")
@@ -380,27 +433,29 @@ def render_add_update_tab() -> None:
         height=100,
     )
 
-    render_action_buttons(
+    def save_entry_action() -> None:
+        if not category.strip() or not key.strip():
+            st.warning("Category and key are required.")
+            return
+        save_entry_and_rerun(category, key, value_text, notes)
+
+    action_row(
         [
             make_button(
-                label="Save entry",
+                label="Save Entry",
                 key="memory_save_btn",
-                action=lambda: (
-                    st.warning("Category and key are required.")
-                    if not category.strip() or not key.strip()
-                    else _save_entry_and_rerun(category, key, value_text, notes)
-                ),
+                action=save_entry_action,
             )
         ]
     )
 
-    st.markdown("### Quick Example")
+    st.markdown("### Example Memory Object")
     st.code(
         json.dumps(
             {
-                "topic": "functions",
-                "weakness": "parameter passing",
-                "last_score": 72,
+                "topic": "loops",
+                "last_problem_type": "missing iteration variable",
+                "confidence": "medium",
             },
             indent=2,
         ),
@@ -438,19 +493,41 @@ def render_events_tab() -> None:
             st.code(event["payload"], language="json")
 
 
+def render_context_tab() -> None:
+    st.markdown("### AI Context Preview")
+
+    query = st.text_input("Optional context query", key="memory_context_query")
+    top_k = st.slider("Context size", min_value=1, max_value=10, value=3, key="memory_context_top_k")
+
+    context = build_memory_context(query=query.strip(), top_k=top_k)
+
+    if not context:
+        st.info("No matching context available.")
+        return
+
+    st.code(context, language="text")
+    bullet_list(
+        [
+            "This is the text block AI tools can use as shared memory context.",
+            "Use concise, high-value entries for best results.",
+        ]
+    )
+
+
 def render(progress_data: Dict[str, Any]) -> None:
     _ = progress_data
 
     init_memory_db()
+    seed_learning_memory()
 
-    section_panel(
-        title="Shared Memory Admin Mode",
-        description="Manage shared memory entries, search stored context, and inspect recent memory events.",
-        icon="🧠",
+    mode_header(
+        "Shared Memory Admin",
+        "Manage shared AI memory entries, search stored context, and inspect recent memory events.",
+        "🧠",
     )
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["Browse", "Add / Update", "Search", "Events"]
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["Browse", "Add / Update", "Search", "Events", "AI Context"]
     )
 
     with tab1:
@@ -465,6 +542,9 @@ def render(progress_data: Dict[str, Any]) -> None:
     with tab4:
         render_events_tab()
 
+    with tab5:
+        render_context_tab()
+
 
 def build_memory_context(query: str = "", top_k: int = 3) -> str:
     if not query:
@@ -475,8 +555,5 @@ def build_memory_context(query: str = "", top_k: int = 3) -> str:
     if not entries:
         return ""
 
-    context_lines = [
-        f'{entry["category"]}/{entry["key"]}: {entry["value"]}'
-        for entry in entries
-    ]
-    return "\n".join(context_lines)
+    lines = [f'{entry["category"]}/{entry["key"]}: {entry["value"]}' for entry in entries]
+    return "\n".join(lines)

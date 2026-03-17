@@ -1,258 +1,347 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import streamlit as st
-
-from core.live_ai import get_live_ai_response
-from core.ui import make_button, render_action_buttons, section_panel
-
-
-WELCOME_MESSAGE = (
-    "Hey — I’m your Python tutor inside Pylot.\n\n"
-    "Ask me anything about Python:\n"
-    "- concepts\n"
-    "- debugging\n"
-    "- reviewing your code\n"
-    "- building projects\n"
-    "- preparing exercises\n\n"
-    "You do not need to choose a topic first. Just type naturally."
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
 )
 
-
-def ensure_ai_state() -> None:
-    if "ai_chat_history" not in st.session_state:
-        st.session_state["ai_chat_history"] = [
-            {
-                "role": "assistant",
-                "content": WELCOME_MESSAGE,
-            }
-        ]
-
-    if "ai_input_prefill" not in st.session_state:
-        st.session_state["ai_input_prefill"] = ""
-
-    if "ai_last_system_prompt" not in st.session_state:
-        st.session_state["ai_last_system_prompt"] = ""
-
-    if "ai_last_user_prompt" not in st.session_state:
-        st.session_state["ai_last_user_prompt"] = ""
+from core.openai_client import get_openai_client
+from core.settings_page import get_personalization_profile
+from core.ui import action_row, bullet_list, make_button, metric_row, mode_header
+from progress import get_learning_profile
 
 
-def reset_ai_chat() -> None:
-    st.session_state["ai_chat_history"] = [
-        {
-            "role": "assistant",
-            "content": WELCOME_MESSAGE,
-        }
-    ]
+SYSTEM_PROMPT = """
+You are the AI mentor inside Pylix, a Python learning platform.
+
+Your job:
+- teach Python clearly and patiently
+- prefer short, practical explanations first
+- use examples often
+- ask a guiding question when useful
+- adapt to beginners unless the user clearly shows stronger skill
+- when the user pastes code, explain what it does and improve it if needed
+- when the user is stuck, give a hint before giving the full answer
+- keep the student moving with momentum
+- prioritize learning by building
+
+Style:
+- direct
+- encouraging
+- structured
+- practical
+
+Response rules:
+- do not overwhelm the learner
+- break answers into steps when useful
+- prefer simple Python first
+- when giving an exercise, do not immediately give the solution unless asked
+""".strip()
+
+
+def _init_state() -> None:
+    st.session_state.setdefault("ai_chat_history", [])
+    st.session_state.setdefault("ai_input_prefill", "")
+    st.session_state.setdefault("ai_last_focus_topic", "general")
+
+
+def _clear_chat() -> None:
+    st.session_state["ai_chat_history"] = []
     st.session_state["ai_input_prefill"] = ""
-    st.session_state["ai_last_system_prompt"] = ""
-    st.session_state["ai_last_user_prompt"] = ""
-
-
-def add_chat_message(role: str, content: str) -> None:
-    st.session_state["ai_chat_history"].append(
-        {
-            "role": role,
-            "content": content,
-        }
-    )
-
-
-def detect_role_from_prompt(prompt: str) -> str:
-    lowered = prompt.lower()
-
-    debug_keywords = [
-        "error",
-        "traceback",
-        "bug",
-        "fix this",
-        "why does this fail",
-        "debug",
-        "exception",
-    ]
-
-    review_keywords = [
-        "review my code",
-        "code review",
-        "is this good",
-        "improve this code",
-        "make this more pythonic",
-        "refactor",
-    ]
-
-    if any(keyword in lowered for keyword in debug_keywords):
-        return "debugger"
-
-    if any(keyword in lowered for keyword in review_keywords):
-        return "reviewer"
-
-    return "tutor"
-
-
-def set_ai_prefill(value: str) -> None:
-    st.session_state["ai_input_prefill"] = value
     st.rerun()
 
 
-def render_quick_actions() -> None:
-    st.markdown("### Quick Starts")
-
-    render_action_buttons(
-        [
-            make_button(
-                label="Explain loops",
-                key="ai_quick_explain_loops",
-                action=lambda: set_ai_prefill("Explain Python loops simply with examples."),
-            ),
-            make_button(
-                label="Debug code",
-                key="ai_quick_debug_code",
-                action=lambda: set_ai_prefill(
-                    "Help me debug this Python code:\n\n```python\n# paste code here\n```"
-                ),
-            ),
-            make_button(
-                label="Practice exercise",
-                key="ai_quick_practice_exercise",
-                action=lambda: set_ai_prefill(
-                    "Give me a Python practice exercise at my level, but do not show the solution yet."
-                ),
-            ),
-            make_button(
-                label="Project idea",
-                key="ai_quick_project_idea",
-                action=lambda: set_ai_prefill(
-                    "Give me a beginner-friendly Python project idea and a step-by-step build plan."
-                ),
-            ),
-        ]
-    )
+def _set_prefill(text: str) -> None:
+    st.session_state["ai_input_prefill"] = text
+    st.rerun()
 
 
-def render_chat_history() -> None:
-    for message in st.session_state["ai_chat_history"]:
+def _append_message(role: str, content: str) -> None:
+    history: List[Dict[str, str]] = st.session_state["ai_chat_history"]
+    history.append({"role": role, "content": content})
+    st.session_state["ai_chat_history"] = history
+
+
+def _learning_style_instructions(style: str) -> str:
+    mapping = {
+        "builder": "Favor project-like explanations, mini-builds, and practical next steps.",
+        "structured": "Favor ordered teaching, numbered steps, and clear sequence.",
+        "explainer": "Spend more time on why concepts work before moving into exercises.",
+        "competitive": "Frame help like missions, tests, score improvements, and short wins.",
+    }
+    return mapping.get(style, mapping["builder"])
+
+
+def _difficulty_instructions(difficulty: str) -> str:
+    mapping = {
+        "easy": "Use a gentle pace with more hints and simpler examples.",
+        "balanced": "Use a balanced pace with guidance first and challenge second.",
+        "hard": "Use a stronger challenge level and prefer hints over full solutions.",
+    }
+    return mapping.get(difficulty, mapping["balanced"])
+
+
+def _session_goal_instructions(session_goal: str) -> str:
+    mapping = {
+        "10": "Keep help concise and action-oriented.",
+        "20": "Keep answers focused but complete.",
+        "30": "It is okay to include more structure and examples.",
+        "45+": "It is okay to include more detailed multi-step guidance.",
+    }
+    return mapping.get(session_goal, mapping["20"])
+
+
+def _build_system_context() -> str:
+    profile = get_learning_profile()
+    personalization = get_personalization_profile()
+
+    context_lines = [
+        SYSTEM_PROMPT,
+        "",
+        "Current learner profile:",
+        f"- completed lessons: {profile.get('completed_lessons', 0)}",
+        f"- completed projects: {profile.get('completed_projects', 0)}",
+        f"- xp: {profile.get('xp', 0)}",
+        f"- level: {profile.get('level', 1)}",
+        f"- current streak: {profile.get('current_streak', 0)}",
+        f"- recommended topic: {profile.get('recommended_topic', 'general')}",
+        f"- recommended mode: {profile.get('recommended_mode', 'Course Mode')}",
+        "",
+        "Personalization instructions:",
+        _learning_style_instructions(personalization.get("learning_style", "builder")),
+        _difficulty_instructions(personalization.get("difficulty", "balanced")),
+        _session_goal_instructions(personalization.get("session_goal", "20")),
+    ]
+
+    top_weak_topics = profile.get("top_weak_topics", [])
+    if top_weak_topics:
+        formatted = ", ".join(f"{topic} ({score})" for topic, score in top_weak_topics)
+        context_lines.append(f"- weak topics: {formatted}")
+
+    return "\n".join(context_lines)
+
+
+def _build_messages() -> List[ChatCompletionMessageParam]:
+    messages: List[ChatCompletionMessageParam] = []
+
+    system_message: ChatCompletionSystemMessageParam = {
+        "role": "system",
+        "content": _build_system_context(),
+    }
+    messages.append(system_message)
+
+    history: List[Dict[str, str]] = st.session_state["ai_chat_history"]
+    for item in history:
+        if item["role"] == "user":
+            user_message: ChatCompletionUserMessageParam = {
+                "role": "user",
+                "content": item["content"],
+            }
+            messages.append(user_message)
+        elif item["role"] == "assistant":
+            assistant_message: ChatCompletionAssistantMessageParam = {
+                "role": "assistant",
+                "content": item["content"],
+            }
+            messages.append(assistant_message)
+
+    return messages
+
+
+def _generate_response() -> str:
+    client = get_openai_client()
+    if client is None:
+        return "OpenAI API key is not configured."
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=_build_messages(),
+            temperature=0.5,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as error:
+        return f"AI error: {error}"
+
+
+def _send_message(text: str) -> None:
+    if not text.strip():
+        return
+
+    _append_message("user", text)
+    reply = _generate_response().strip()
+
+    if not reply:
+        reply = "I could not generate a response. Try asking in a more specific way."
+
+    _append_message("assistant", reply)
+    st.session_state["ai_input_prefill"] = ""
+    st.rerun()
+
+
+def _render_history() -> None:
+    history: List[Dict[str, str]] = st.session_state["ai_chat_history"]
+    for message in history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
 
-def build_context_payload(progress_data: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "completed_lessons": progress_data.get("completed_lessons", []),
-        "completed_projects": progress_data.get("completed_projects", []),
-        "review_passed": progress_data.get("review_passed", {}),
-        "weak_topics": progress_data.get("weak_topics", {}),
-    }
+def _render_primary_actions() -> None:
+    st.markdown("### Guided Starts")
+    action_row(
+        [
+            make_button(
+                label="Explain a Concept",
+                key="ai_quick_explain_concept",
+                action=lambda: _set_prefill(
+                    "Explain this Python concept simply, give 2 examples, then ask me 1 short check question."
+                ),
+            ),
+            make_button(
+                label="Debug My Code",
+                key="ai_quick_debug_code",
+                action=lambda: _set_prefill(
+                    "Help me debug this Python code. First explain the issue, then show the fix, then explain how to avoid it next time.\n\n```python\n# paste code here\n```"
+                ),
+            ),
+            make_button(
+                label="Give Me Practice",
+                key="ai_quick_practice",
+                action=lambda: _set_prefill(
+                    "Give me one short Python practice challenge for my level. Do not give the solution yet."
+                ),
+            ),
+            make_button(
+                label="Build a Project",
+                key="ai_quick_project_path",
+                action=lambda: _set_prefill(
+                    "Give me a Python project idea for my level with step-by-step milestones, what I will learn, and starter code."
+                ),
+            ),
+        ]
+    )
 
 
-def render_debug_panel() -> None:
-    with st.expander("AI Debug Panel", expanded=False):
-        st.caption("Useful while wiring prompts and memory.")
-        st.markdown("**Last System Prompt**")
-        st.code(st.session_state.get("ai_last_system_prompt", ""), language="text")
+def _render_secondary_actions() -> None:
+    st.markdown("### Learning Paths")
+    action_row(
+        [
+            make_button(
+                label="Teach Me by Building",
+                key="ai_quick_building_path",
+                action=lambda: _set_prefill(
+                    "Teach me Python by building something small. Pick a beginner-friendly app, break it into steps, and guide me through step 1."
+                ),
+            ),
+            make_button(
+                label="Quiz Me",
+                key="ai_quick_quiz",
+                action=lambda: _set_prefill(
+                    "Quiz me on Python based on my current level. Ask one question at a time and wait for my answer."
+                ),
+            ),
+            make_button(
+                label="Review My Thinking",
+                key="ai_quick_reasoning",
+                action=lambda: _set_prefill(
+                    "I will explain my Python thinking. Check whether my reasoning is correct and improve it."
+                ),
+            ),
+            make_button(
+                label="Clear Chat",
+                key="ai_clear_chat",
+                action=_clear_chat,
+            ),
+        ]
+    )
 
-        st.markdown("**Last User Prompt**")
-        st.code(st.session_state.get("ai_last_user_prompt", ""), language="text")
+
+def _render_coach_panel() -> None:
+    profile = get_learning_profile()
+    personalization = get_personalization_profile()
+
+    st.markdown("### Mentor Dashboard")
+    metric_row(
+        [
+            ("XP", profile.get("xp", 0)),
+            ("Level", profile.get("level", 1)),
+            ("Streak", profile.get("current_streak", 0)),
+            ("Weak Topics", len(profile.get("weak_topics", {}))),
+        ]
+    )
+
+    st.caption(
+        f"Recommended next step: {profile.get('recommended_mode', 'Course Mode')} • "
+        f"Focus topic: {profile.get('recommended_topic', 'general')}"
+    )
+    st.caption(
+        f"Style: {personalization.get('learning_style', 'builder').title()} • "
+        f"Difficulty: {personalization.get('difficulty', 'balanced').title()} • "
+        f"Goal: {personalization.get('session_goal', '20')} min"
+    )
+
+    weak_topics = profile.get("top_weak_topics", [])
+    if weak_topics:
+        bullet_list([f"{topic} ({score})" for topic, score in weak_topics])
+    else:
+        st.caption("No major weak topics detected right now.")
 
 
-def send_ai_prompt(user_prompt: str, progress_data: Dict[str, Any]) -> None:
-    add_chat_message("user", user_prompt)
-
-    role = detect_role_from_prompt(user_prompt)
-    lesson_context = build_context_payload(progress_data)
-
-    try:
-        system_prompt, built_user_prompt, reply = get_live_ai_response(
-            role=role,
-            question=user_prompt,
-            code="",
-            error_text="",
-            lesson=lesson_context,
-            weak_topics=progress_data.get("weak_topics", {}),
-            model="gpt-4o-mini",
-            use_shared_memory=True,
-        )
-
-        st.session_state["ai_last_system_prompt"] = system_prompt
-        st.session_state["ai_last_user_prompt"] = built_user_prompt
-
-        if not reply.strip():
-            reply = (
-                "I did not get a complete response back. Try asking again, "
-                "or make the question a little more specific."
-            )
-
-    except RuntimeError as error:
-        reply = (
-            "AI Mode is not configured yet.\n\n"
-            f"Details: `{error}`\n\n"
-            "Make sure your OpenAI API key is set in `.streamlit/secrets.toml` "
-            "or as an environment variable."
-        )
-
-    except (ValueError, TypeError, AttributeError) as error:
-        reply = f"AI Mode hit an error:\n\n`{error}`"
-
-    add_chat_message("assistant", reply)
-    st.session_state["ai_input_prefill"] = ""
-    st.rerun()
+def _render_prompt_starters() -> None:
+    st.markdown("### Prompt Ideas")
+    bullet_list(
+        [
+            "Explain loops like I am a beginner.",
+            "Help me understand this function.",
+            "Why does this error happen?",
+            "Give me a project idea based on what I know.",
+            "Quiz me without telling me the answer right away.",
+            "Turn this code into cleaner Python.",
+        ]
+    )
 
 
 def render(progress_data: Dict[str, Any]) -> None:
-    ensure_ai_state()
+    _ = progress_data
 
-    section_panel(
-        title="AI Tutor",
-        description=(
-            "Chat naturally about Python. Ask questions, paste code, debug errors, "
-            "get explanations, or request practice."
-        ),
-        icon="🤖",
+    _init_state()
+
+    mode_header(
+        "AI Tutor",
+        "Work with an adaptive Python mentor that teaches, quizzes, explains, and helps you build.",
+        "🤖",
     )
 
-    top_left, top_right = st.columns([5, 1])
-
-    with top_left:
-        render_quick_actions()
-
-    with top_right:
-        st.markdown("### ")
-        render_action_buttons(
-            [
-                make_button(
-                    label="Clear Chat",
-                    key="ai_clear_chat",
-                    action=reset_ai_chat,
-                )
-            ]
-        )
-
-    render_chat_history()
+    _render_coach_panel()
+    _render_primary_actions()
+    _render_secondary_actions()
+    _render_prompt_starters()
+    _render_history()
 
     prefill = st.session_state.get("ai_input_prefill", "")
     if prefill:
         st.text_area(
-            "Prepared prompt",
+            "Prepared Prompt",
             value=prefill,
             height=120,
             key="ai_prefill_preview",
             disabled=True,
         )
-
-        render_action_buttons(
+        action_row(
             [
                 make_button(
                     label="Send Prepared Prompt",
                     key="ai_send_prefill",
-                    action=lambda: send_ai_prompt(prefill, progress_data),
+                    action=lambda: _send_message(prefill),
                 )
             ]
         )
 
-    user_prompt = st.chat_input("Ask anything about Python...")
-
-    if user_prompt:
-        send_ai_prompt(user_prompt, progress_data)
-
-    render_debug_panel()
+    user_input = st.chat_input("Ask your AI mentor a Python question")
+    if user_input:
+        _send_message(user_input)
